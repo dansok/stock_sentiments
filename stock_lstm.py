@@ -73,7 +73,7 @@ def load_sentiment_data(sentiment_file):
 
 def preprocess_data(stock_df, sentiment_df):
     merged_df = stock_df.join(sentiment_df["aapl_sentiment_score"], how="left")
-    merged_df["aapl_sentiment_score"] = merged_df["aapl_sentiment_score"].fillna(0)  # Correctly filling NaNs with 0
+    merged_df["aapl_sentiment_score"] = merged_df["aapl_sentiment_score"].fillna(0)
     merged_df["returns"] = merged_df["close"].pct_change()
     merged_df["volatility"] = merged_df["returns"].rolling(window=21).std()
     return merged_df.dropna()
@@ -84,7 +84,7 @@ def create_sequences(data, seq_length):
     targets = []
     for i in range(len(data) - seq_length):
         sequences.append(data[i:i + seq_length])
-        targets.append(data[i + seq_length, 0])
+        targets.append(data[i + seq_length])
     return np.array(sequences), np.array(targets)
 
 
@@ -115,10 +115,10 @@ def visualize_results(model, X_train, y_train, scaler):
 
     # Inverse transform the predictions and actual values
     predictions = scaler.inverse_transform(
-        np.concatenate((predictions, np.zeros((predictions.shape[0], 3))), axis=1)
+        np.concatenate((predictions, np.zeros((predictions.shape[0], X_train.shape[2] - 1))), axis=1)
     )[:, 0]
     y_train = scaler.inverse_transform(
-        np.concatenate((y_train.cpu().numpy(), np.zeros((y_train.shape[0], 3))), axis=1)
+        np.concatenate((y_train.cpu().numpy(), np.zeros((y_train.shape[0], X_train.shape[2] - 1))), axis=1)
     )[:, 0]
 
     # Plotting the results
@@ -136,27 +136,26 @@ def visualize_results(model, X_train, y_train, scaler):
     print(f"Root Mean Square Error (RMSE): {rmse:.4f}")
 
 
-def visualize_volatility(model, seq_length, X_train, scaler, merged_df):
+def visualize_volatility(model, X_train, y_train, scaler):
     model.eval()
     with torch.no_grad():
         predictions = model(X_train).cpu().numpy()
 
-    # Inverse transform the predictions and actual values
+    # Inverse transform the predictions
     predictions = scaler.inverse_transform(
-        np.concatenate((predictions, np.zeros((predictions.shape[0], 3))), axis=1)
-    )[:, 3]  # Assuming the volatility is at the 4th column in the original scaled data
+        np.concatenate((predictions, np.zeros((predictions.shape[0], X_train.shape[2] - 1))), axis=1)
+    )[:, 3]
 
-    # Extract realized volatility from merged DataFrame
-    realized_volatility = merged_df["volatility"].iloc[seq_length:].values
+    # Extract realized volatility from original data
+    realized_volatility = y_train[:, 3].cpu().numpy()
 
     # Plotting the results
     plt.figure(figsize=(14, 7))
-    plt.plot(realized_volatility, label="Realized Volatility", color='blue')  # Plot realized volatility in blue
-    plt.plot(predictions, label="Predicted Volatility", color='orange')  # Plot predicted volatility in orange
+    plt.plot(realized_volatility, label="Realized Volatility", color='blue')
+    plt.plot(predictions, label="Predicted Volatility", color='orange')
     plt.legend()
     plt.title("Realized vs Predicted Volatility")
     plt.show()
-
 
 
 def main():
@@ -178,13 +177,13 @@ def main():
 
     # Convert data to PyTorch tensors
     X_train = torch.tensor(X, dtype=torch.float32).to(device)
-    y_train = torch.tensor(y, dtype=torch.float32).to(device).view(-1, 1)
+    y_train = torch.tensor(y, dtype=torch.float32).to(device)
 
     # Train LSTM model
     input_size = X.shape[2]
     hidden_size = 128
     num_layers = 2
-    output_size = 1
+    output_size = 4  # Predicting all 4 features: close, volume, aapl_sentiment_score, volatility
     num_epochs = 100
     learning_rate = 0.001
 
@@ -194,7 +193,7 @@ def main():
     visualize_results(model, X_train, y_train, scaler)
 
     # Visualize realized vs predicted volatility
-    visualize_volatility(model, seq_length, X_train, scaler, merged_df)
+    visualize_volatility(model, X_train, y_train, scaler)
 
     # Save the model
     torch.save(model.state_dict(), Path("models/stock_lstm_model.pth"))
