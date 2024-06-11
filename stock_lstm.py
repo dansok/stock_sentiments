@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
 class StockLSTM(nn.Module):
@@ -128,6 +129,35 @@ def visualize_results(model, X_train, y_train, scaler):
     plt.title("Actual vs Predicted Stock Prices")
     plt.show()
 
+    # Summary error statistics
+    mae = mean_absolute_error(y_train, predictions)
+    rmse = np.sqrt(mean_squared_error(y_train, predictions))
+    print(f"Mean Absolute Error (MAE): {mae:.4f}")
+    print(f"Root Mean Square Error (RMSE): {rmse:.4f}")
+
+
+def visualize_volatility(model, seq_length, X_train, scaler, merged_df):
+    model.eval()
+    with torch.no_grad():
+        predictions = model(X_train).cpu().numpy()
+
+    # Inverse transform the predictions and actual values
+    predictions = scaler.inverse_transform(
+        np.concatenate((predictions, np.zeros((predictions.shape[0], 3))), axis=1)
+    )[:, 3]  # Assuming the volatility is at the 4th column in the original scaled data
+
+    # Extract realized volatility from merged DataFrame
+    realized_volatility = merged_df["volatility"].iloc[seq_length:].values
+
+    # Plotting the results
+    plt.figure(figsize=(14, 7))
+    plt.plot(realized_volatility, label="Realized Volatility", color='blue')  # Plot realized volatility in blue
+    plt.plot(predictions, label="Predicted Volatility", color='orange')  # Plot predicted volatility in orange
+    plt.legend()
+    plt.title("Realized vs Predicted Volatility")
+    plt.show()
+
+
 
 def main():
     stock_files_directory = Path("data/aapl_prices")
@@ -152,19 +182,22 @@ def main():
 
     # Train LSTM model
     input_size = X.shape[2]
-    hidden_size = 64
+    hidden_size = 128
     num_layers = 2
     output_size = 1
-    num_epochs = 1
-    learning_rate = 1
+    num_epochs = 100
+    learning_rate = 0.001
 
     model = train_lstm(X_train, y_train, input_size, hidden_size, num_layers, output_size, num_epochs, learning_rate)
 
     # Visualize results
     visualize_results(model, X_train, y_train, scaler)
 
+    # Visualize realized vs predicted volatility
+    visualize_volatility(model, seq_length, X_train, scaler, merged_df)
+
     # Save the model
-    torch.save(model.state_dict(), "stock_lstm_model.pth")
+    torch.save(model.state_dict(), Path("models/stock_lstm_model.pth"))
 
 
 if __name__ == "__main__":
