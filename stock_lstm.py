@@ -12,6 +12,9 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class StockLSTM(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):
         super(StockLSTM, self).__init__()
@@ -102,8 +105,7 @@ def train_lstm(X_train, y_train, input_size, hidden_size, num_layers, output_siz
         loss.backward()
         optimizer.step()
 
-        if (epoch + 1) % 10 == 0:
-            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
+        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
 
     return model
 
@@ -113,49 +115,36 @@ def visualize_results(model, X_train, y_train, scaler):
     with torch.no_grad():
         predictions = model(X_train).cpu().numpy()
 
-    # Inverse transform the predictions and actual values
-    predictions = scaler.inverse_transform(
-        np.concatenate((predictions, np.zeros((predictions.shape[0], X_train.shape[2] - 1))), axis=1)
-    )[:, 0]
-    y_train = scaler.inverse_transform(
-        np.concatenate((y_train.cpu().numpy(), np.zeros((y_train.shape[0], X_train.shape[2] - 1))), axis=1)
-    )[:, 0]
+    predictions_descaled = scaler.inverse_transform(predictions)
+    y_train_descaled = scaler.inverse_transform(y_train)
 
-    # Plotting the results
+    closing_prices_predicted = predictions_descaled[:, 0]
+    closing_prices_actual = y_train_descaled[:, 0]
+
+    volatilities_predicted = predictions_descaled[:, 3]
+    volatilities_actual = y_train_descaled[:, 3]
+
+    # Plotting closing prices results
     plt.figure(figsize=(14, 7))
-    plt.plot(y_train, label="Actual")
-    plt.plot(predictions, label="Predicted")
+    plt.plot(closing_prices_actual, label="Actual Closing Price")
+    plt.plot(closing_prices_predicted, label="Predicted Closing Price")
     plt.legend()
     plt.title("Actual vs Predicted Stock Prices")
     plt.show()
 
-    # Summary error statistics
-    mae = mean_absolute_error(y_train, predictions)
-    rmse = np.sqrt(mean_squared_error(y_train, predictions))
-    print(f"Mean Absolute Error (MAE): {mae:.4f}")
-    print(f"Root Mean Square Error (RMSE): {rmse:.4f}")
-
-
-def visualize_volatility(model, X_train, y_train, scaler):
-    model.eval()
-    with torch.no_grad():
-        predictions = model(X_train).cpu().numpy()
-
-    # Inverse transform the predictions
-    predictions = scaler.inverse_transform(
-        np.concatenate((predictions, np.zeros((predictions.shape[0], X_train.shape[2] - 1))), axis=1)
-    )[:, 3]
-
-    # Extract realized volatility from original data
-    realized_volatility = y_train[:, 3].cpu().numpy()
-
-    # Plotting the results
+    # Plotting volatility results
     plt.figure(figsize=(14, 7))
-    plt.plot(realized_volatility, label="Realized Volatility", color='blue')
-    plt.plot(predictions, label="Predicted Volatility", color='orange')
+    plt.plot(volatilities_actual, label="Realized Volatility", color='blue')
+    plt.plot(volatilities_predicted, label="Predicted Volatility", color='orange')
     plt.legend()
     plt.title("Realized vs Predicted Volatility")
     plt.show()
+
+    # Summary error statistics
+    mae = mean_absolute_error(closing_prices_actual, closing_prices_predicted)
+    rmse = np.sqrt(mean_squared_error(closing_prices_actual, closing_prices_predicted))
+    print(f"Mean Absolute Error (MAE): {mae:.4f}")
+    print(f"Root Mean Square Error (RMSE): {rmse:.4f}")
 
 
 def main():
@@ -192,13 +181,9 @@ def main():
     # Visualize results
     visualize_results(model, X_train, y_train, scaler)
 
-    # Visualize realized vs predicted volatility
-    visualize_volatility(model, X_train, y_train, scaler)
-
     # Save the model
     torch.save(model.state_dict(), Path("models/stock_lstm_model.pth"))
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     main()
